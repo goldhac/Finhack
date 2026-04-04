@@ -25,6 +25,24 @@ df = df.set_index('date').sort_index()
 with open(os.path.join(OUTPUT_DIR, 'gssi_summary.json')) as f:
     summary = json.load(f)
 
+with open(os.path.join(OUTPUT_DIR, 'dashboard_data.json')) as f:
+    dash_data = json.load(f)
+
+# Build forecast DataFrame — prepend the last historical point so the line
+# connects seamlessly to the GSSI_bucketed trace.
+_last = df[['GSSI_bucketed']].iloc[[-1]].copy()
+_last.columns = ['GSSI_Forecast']
+_fcast_rows = pd.DataFrame(dash_data['forecast']).assign(
+    date=lambda x: pd.to_datetime(x['Date'])
+).set_index('date')[['GSSI_Forecast']]
+forecast_df = pd.concat([_last.rename_axis('date'), _fcast_rows])
+
+fcast_meta   = dash_data['forecast_meta']
+best_model   = fcast_meta['best_model']
+mae_hw       = fcast_meta['holdout_mae_holtwinters']
+mae_xgb      = fcast_meta['holdout_mae_xgboost']
+mae_naive    = fcast_meta['holdout_mae_naive']
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Colours & constants
 # ─────────────────────────────────────────────────────────────────────────────
@@ -146,6 +164,35 @@ fig.add_trace(
         hovertemplate='<b>GSSI (Equal-wt)</b><br>%{x|%b %Y}<br>%{y:.3f}<extra></extra>',
     ),
     row=1, col=1,
+)
+
+# 6-month forecast (dashed teal, connects from last historical point)
+fig.add_trace(
+    go.Scatter(
+        x=forecast_df.index, y=forecast_df['GSSI_Forecast'],
+        name=f'Forecast ({best_model})', mode='lines+markers',
+        line=dict(color='#17becf', width=2.0, dash='dot'),
+        marker=dict(size=6, symbol='circle', color='#17becf'),
+        hovertemplate='<b>Forecast</b><br>%{x|%b %Y}<br>GSSI = %{y:.2f}<extra></extra>',
+    ),
+    row=1, col=1,
+)
+
+# Vertical line at forecast start
+_forecast_start = str(df.index[-1].date())
+fig.add_vline(
+    x=_forecast_start,
+    line=dict(color='#17becf', width=1.2, dash='dash'),
+    row=1, col=1,
+)
+fig.add_annotation(
+    x=_forecast_start,
+    y=1.01,
+    yref='paper',
+    text='Forecast →',
+    showarrow=False,
+    font=dict(size=9, color='#17becf'),
+    xanchor='left',
 )
 
 # Threshold lines (Elevated / Severe)
@@ -274,7 +321,9 @@ fig.update_layout(
     title=dict(
         text=(
             '<b>Global Supply Chain Stress Index (GSSI)</b><br>'
-            '<sup>Bucketed equal-weight | Expanding z-score | Feb 2001 – Feb 2026</sup>'
+            '<sup>Bucketed equal-weight | Expanding z-score | Feb 2001 – Feb 2026 '
+            f'| 6-month forecast via {best_model} '
+            f'(holdout MAE: HW={mae_hw:.3f}, XGB={mae_xgb:.3f}, Naive={mae_naive:.3f})</sup>'
         ),
         font=dict(size=18),
         x=0.5,

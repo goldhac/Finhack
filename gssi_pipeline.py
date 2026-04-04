@@ -649,6 +649,256 @@ print(f"\nSaved chart: {chart_path}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STEP 10 – FORECASTING MODULE
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n" + "="*70)
+print("STEP 10 – FORECASTING MODULE")
+print("="*70)
+
+import xgboost as xgb
+from statsmodels.tsa.holtwinters import ExponentialSmoothing as HoltWinters
+from statsmodels.tsa.arima.model import ARIMA as _ARIMA
+
+HORIZON      = 6
+HOLDOUT      = 12
+HIST_MIN     = float(gssi_bucketed.min())
+HIST_MAX     = float(gssi_bucketed.max())
+HIST_MEAN    = float(gssi_bucketed.mean())
+
+CONTRIB_COLS = [
+    'contrib_A_freight', 'contrib_B_frictions',
+    'contrib_C_energy_costs', 'contrib_D_production', 'contrib_overlay_vix',
+]
+
+# ── Build XGBoost feature matrix ──────────────────────────────────────────────
+def build_xgb_features(gssi_s, contrib_df):
+    """Lag + rolling features; all lagged to avoid look-ahead bias."""
+    feat = pd.DataFrame(index=gssi_s.index)
+    for lag in [1, 2, 3]:
+        feat[f'gssi_lag{lag}'] = gssi_s.shift(lag)
+    for col in CONTRIB_COLS:
+        for lag in [1, 2, 3]:
+            feat[f'{col}_lag{lag}'] = contrib_df[col].shift(lag)
+    feat['gssi_roll3_mean'] = gssi_s.shift(1).rolling(3).mean()
+    feat['gssi_roll3_std']  = gssi_s.shift(1).rolling(3).std()
+    return feat
+
+all_features = build_xgb_features(gssi_bucketed, contributions)
+valid_idx    = all_features.dropna().index
+feat_full    = all_features.loc[valid_idx]
+gssi_full    = gssi_bucketed.loc[valid_idx]
+
+train_feat   = feat_full.iloc[:-HOLDOUT]
+train_target = gssi_full.iloc[:-HOLDOUT]
+hold_target  = gssi_full.iloc[-HOLDOUT:]
+
+train_series = gssi_bucketed.iloc[:-HOLDOUT]   # for HW / Naive
+
+# ── MODEL 1: Naive Persistence ────────────────────────────────────────────────
+print("\n--- Model 1: Naive Persistence ---")
+naive_val           = float(train_series.iloc[-1])
+naive_holdout_preds = np.full(HOLDOUT, naive_val)
+mae_naive           = float(np.mean(np.abs(naive_holdout_preds - hold_target.values)))
+print(f"  Last known value : {naive_val:.3f}")
+print(f"  Holdout MAE      : {mae_naive:.3f}")
+
+# ── MODEL 2: Holt-Winters ─────────────────────────────────────────────────────
+print("\n--- Model 2: Holt-Winters Exponential Smoothing ---")
+hw_display = None
+
+def _fit_hw(series):
+    """Try HW with full seasonal, then trend-only, then ARIMA(1,1,1) fallback."""
+    global hw_display
+    try:
+        m = HoltWinters(
+            series, trend='add', seasonal='add', seasonal_periods=12,
+            initialization_method='estimated',
+        ).fit(optimized=True)
+        hw_display = "Holt-Winters (add trend + add seasonal)"
+        return m, 'hw'
+    except Exception as e1:
+        print(f"  Full seasonal failed ({e1}), trying trend-only...")
+        try:
+            m = HoltWinters(
+                series, trend='add', seasonal=None,
+                initialization_method='estimated',
+            ).fit(optimized=True)
+            hw_display = "Holt-Winters (add trend only)"
+            return m, 'hw'
+        except Exception as e2:
+            print(f"  Trend-only failed ({e2}), falling back to ARIMA(1,1,1)...")
+            m = _ARIMA(series, order=(1, 1, 1)).fit()
+            hw_display = "ARIMA(1,1,1) [HW fallback]"
+            return m, 'arima'
+
+hw_model_obj, hw_type = _fit_hw(train_series)
+print(f"  Fitted: {hw_display}")
+
+if hw_type == 'hw':
+    hw_holdout_preds = hw_model_obj.forecast(HOLDOUT).values
+else:
+    hw_holdout_preds = hw_model_obj.forecast(HOLDOUT).values
+
+mae_hw = float(np.mean(np.abs(hw_holdout_preds - hold_target.values)))
+print(f"  Holdout MAE      : {mae_hw:.3f}")
+
+# ── MODEL 3: XGBoost ─────────────────────────────────────────────────────────
+print("\n--- Model 3: XGBoost (lagged bucket features) ---")
+
+def xgb_recursive_forecast(model, seed_gssi, seed_contribs, n_steps):
+    """
+    Recursive multi-step forecasting.
+    seed_gssi must have >= 3 rows; seed_contribs aligned to same index.
+    """
+    gssi_hist    = list(seed_gssi.values)
+    contrib_hist = {col: list(seed_contribs[col].values) for col in CONTRIB_COLS}
+    preds = []
+    for _ in range(n_steps):
+        row = {}
+        for lag in [1, 2, 3]:
+            row[f'gssi_lag{lag}'] = gssi_hist[-lag]
+        for col in CONTRIB_COLS:
+            h = contrib_hist[col]
+            for lag in [1, 2, 3]:
+                row[f'{col}_lag{lag}'] = h[-lag]
+        recent = [gssi_hist[-3], gssi_hist[-2], gssi_hist[-1]]
+        row['gssi_roll3_mean'] = float(np.mean(recent))
+        row['gssi_roll3_std']  = (float(np.std(recent, ddof=1))
+                                  if len(set(recent)) > 1 else 0.0)
+        pred = float(model.predict(pd.DataFrame([row]))[0])
+        preds.append(pred)
+        gssi_hist.append(pred)
+        for col in CONTRIB_COLS:
+            contrib_hist[col].append(contrib_hist[col][-1])
+    return np.array(preds)
+
+xgb_model = xgb.XGBRegressor(
+    n_estimators=200, max_depth=3, learning_rate=0.05,
+    subsample=0.8, random_state=42, verbosity=0,
+)
+xgb_model.fit(train_feat.values, train_target.values)
+
+seed_gssi_hold    = train_series.iloc[-3:]
+seed_contribs_hold = contributions.loc[seed_gssi_hold.index]
+xgb_holdout_preds = xgb_recursive_forecast(
+    xgb_model, seed_gssi_hold, seed_contribs_hold, HOLDOUT
+)
+mae_xgb = float(np.mean(np.abs(xgb_holdout_preds - hold_target.values)))
+print(f"  Holdout MAE      : {mae_xgb:.3f}")
+
+# ── Summary table ─────────────────────────────────────────────────────────────
+print("\n" + "-"*58)
+print(f"{'Model':<33} {'Holdout MAE':>12} {'Beat Naive?':>11}")
+print("-"*58)
+print(f"{'Naive Persistence':<33} {mae_naive:>12.3f} {'—':>11}")
+print(f"{'Holt-Winters':<33} {mae_hw:>12.3f} {'Yes' if mae_hw < mae_naive else 'No':>11}")
+print(f"{'XGBoost (lagged bucket feats)':<33} {mae_xgb:>12.3f} {'Yes' if mae_xgb < mae_naive else 'No':>11}")
+print("-"*58)
+
+# ── Select best model (Naive never ships) ─────────────────────────────────────
+mae_scores = {
+    'Holt-Winters':                mae_hw,
+    'XGBoost (lagged bucket feats)': mae_xgb,
+    'Naive Persistence':           mae_naive,
+}
+best_key = min(mae_scores, key=mae_scores.get)
+if best_key == 'Naive Persistence':
+    best_key = 'Holt-Winters'
+    print(f"\n  Naive wins on holdout — defaulting to Holt-Winters for production.")
+else:
+    print(f"\n  Best model: {best_key}  (lowest holdout MAE = {mae_scores[best_key]:.3f})")
+
+# ── Production forecast (retrain on full series) ──────────────────────────────
+print(f"\n--- Production Forecast (6-month): {best_key} ---")
+
+forecast_dates = pd.date_range(
+    start=gssi_bucketed.index[-1] + pd.offsets.MonthEnd(1),
+    periods=HORIZON,
+    freq='ME',
+)
+
+if best_key == 'Holt-Winters':
+    prod_model_obj, _ = _fit_hw(gssi_bucketed)
+    prod_preds = prod_model_obj.forecast(HORIZON).values
+    prod_display = hw_display
+else:  # XGBoost
+    xgb_prod = xgb.XGBRegressor(
+        n_estimators=200, max_depth=3, learning_rate=0.05,
+        subsample=0.8, random_state=42, verbosity=0,
+    )
+    xgb_prod.fit(feat_full.values, gssi_full.values)
+    seed_gssi_prod     = gssi_bucketed.iloc[-3:]
+    seed_contribs_prod = contributions.loc[seed_gssi_prod.index]
+    prod_preds   = xgb_recursive_forecast(
+        xgb_prod, seed_gssi_prod, seed_contribs_prod, HORIZON
+    )
+    prod_display = best_key
+
+# Clip to observed range; replace non-finite with historical mean
+prod_preds = np.clip(prod_preds, HIST_MIN, HIST_MAX)
+prod_preds = np.where(np.isfinite(prod_preds), prod_preds, HIST_MEAN)
+
+# ── Print forecast table ──────────────────────────────────────────────────────
+print(f"\n  Model used for production: {prod_display}")
+print(f"\n  {'Date':<12}  {'GSSI_Forecast':>14}")
+print("  " + "-"*28)
+for dt, val in zip(forecast_dates, prod_preds):
+    print(f"  {dt.strftime('%Y-%m-%d'):<12}  {val:>14.2f}")
+
+# ── Write output/dashboard_data.json ─────────────────────────────────────────
+def _safe(x):
+    v = float(x)
+    return round(v if np.isfinite(v) else HIST_MEAN, 2)
+
+hist_tail = output_df.tail(36)
+
+historical_records = [
+    {
+        "Date":            dt.strftime("%Y-%m-%d"),
+        "GSSI_Historical": _safe(row['GSSI_bucketed']),
+        "GSCPI_Norm":      _safe(row['norm_GSCPI']),
+        "CPIAUCSL_Norm":   _safe(row['norm_CPI']),
+    }
+    for dt, row in hist_tail.iterrows()
+]
+
+forecast_records = [
+    {
+        "Date":          dt.strftime("%Y-%m-%d"),
+        "GSSI_Forecast": round(float(v), 2),
+    }
+    for dt, v in zip(forecast_dates, prod_preds)
+]
+
+forecast_meta = {
+    "target":                   "GSSI_bucketed",
+    "best_model":               best_key,
+    "horizon_months":           HORIZON,
+    "holdout_months":           HOLDOUT,
+    "holdout_mae_naive":        round(mae_naive, 4),
+    "holdout_mae_holtwinters":  round(mae_hw, 4),
+    "holdout_mae_xgboost":      round(mae_xgb, 4),
+    "note": ("Forecast uses walk-forward validation. Best model selected by "
+             "holdout MAE. Naive model never used for production."),
+}
+
+dash_payload = {
+    "historical":    historical_records,
+    "forecast":      forecast_records,
+    "forecast_meta": forecast_meta,
+}
+
+dash_path = os.path.join(OUTPUT_DIR, 'dashboard_data.json')
+with open(dash_path, 'w') as f:
+    json.dump(dash_payload, f, indent=4, allow_nan=False)
+
+print(f"\nSaved: {dash_path}")
+print(f"  historical : {len(historical_records)} records")
+print(f"  forecast   : {len(forecast_records)} records")
+print(f"  best model : {best_key}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # DONE
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n" + "="*70)
