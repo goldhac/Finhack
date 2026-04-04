@@ -10,12 +10,7 @@ import type {
   CachedPortfolio,
 } from '@/types/chat'
 
-// ── Mock data imports (aggregated for context injection) ──
-import { summaryMock } from '@/data/summary.mock'
-import { driversMock } from '@/data/drivers.mock'
-import { forecastMock } from '@/data/forecast.mock'
-import { implicationsMock } from '@/data/implications.mock'
-import { recommendationsMock } from '@/data/recommendations.mock'
+// ── Portfolio mock data (still used until portfolio page is wired to API) ──
 import { regimeContextMock } from '@/data/portfolio/regime.mock'
 import { allocationsMock } from '@/data/portfolio/allocations.mock'
 import { sectorsMock } from '@/data/portfolio/sectors.mock'
@@ -75,13 +70,21 @@ export function usePortfolioCache() {
 export function useChat(userPortfolio: ParsedPortfolio | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
 
-  // Aggregate all data surfaces
-  const dashboardContext = {
-    overview: summaryMock,
-    drivers: driversMock,
-    forecast: forecastMock,
-    implications: implicationsMock,
-    recommendations: recommendationsMock,
+  // Dashboard context is fetched live from the API at send-time so CISCO
+  // always has the most recent GSSI data injected into the conversation.
+  const fetchDashboardContext = async () => {
+    try {
+      const [overview, drivers, forecast, implications, recommendations] = await Promise.all([
+        apiFetch('/gssi/summary'),
+        apiFetch('/gssi/drivers'),
+        apiFetch('/gssi/forecast'),
+        apiFetch('/gssi/implications'),
+        apiFetch('/gssi/recommendations'),
+      ])
+      return { overview, drivers, forecast, implications, recommendations }
+    } catch {
+      return null
+    }
   }
 
   const portfolioContext = {
@@ -101,6 +104,8 @@ export function useChat(userPortfolio: ParsedPortfolio | null) {
         role: m.role as 'user' | 'assistant',
         content: m.content,
       }))
+
+      const dashboardContext = await fetchDashboardContext() ?? undefined
 
       const payload: ChatRequest = {
         message,
