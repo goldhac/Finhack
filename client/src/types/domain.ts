@@ -18,14 +18,18 @@ export interface ForecastPoint {
   date: string
   actual: number | null
   forecast: number | null
+  lower_80?: number | null
+  upper_80?: number | null
+  lower_95?: number | null
+  upper_95?: number | null
   probability?: number
 }
 
 export interface DriverBucket {
   id: string
   name: string
-  score: number           
-  contribution: number    
+  score: number
+  contribution: number
   status: 'improving' | 'worsening' | 'stable'
 }
 

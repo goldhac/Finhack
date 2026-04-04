@@ -1,17 +1,17 @@
 {
   "date": "2026-02-28",
-  "GSSI_bucketed": 0.0708,
-  "GSSI_equal": 0.0426,
-  "GSSI_invvol": 0.0377,
+  "GSSI_bucketed": 0.0735,
+  "GSSI_equal": 0.0513,
+  "GSSI_invvol": 0.0441,
   "regime": "Normal",
-  "percentile": 56.33,
+  "percentile": 50.9,
   "top_contributing_bucket": "Bucket B \u2013 Frictions (GSCPI)",
   "bucket_contributions": {
-    "Bucket A \u2013 Freight (BDI)": -0.0354,
-    "Bucket B \u2013 Frictions (GSCPI)": 0.1131,
-    "Bucket C \u2013 Energy/Costs (WTI + CPI)": 0.016,
-    "Bucket D \u2013 Production (INDPRO)": -0.0109,
-    "Market Stress Overlay (VIX)": -0.0121
+    "Bucket A \u2013 Freight (BDI)": -0.0344,
+    "Bucket B \u2013 Frictions (GSCPI)": 0.1043,
+    "Bucket C \u2013 Energy/Costs (WTI + CPI)": 0.023,
+    "Bucket D \u2013 Production (INDPRO)": -0.012,
+    "Market Stress Overlay (VIX)": -0.0074
   },
   "weighting_methodology": {
     "primary": "Bucketed equal-weight (A=25%, B=25%, C=25%, D=12.5%, VIX=12.5%)",

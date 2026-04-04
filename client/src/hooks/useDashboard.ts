@@ -1,49 +1,73 @@
 import { useQuery } from '@tanstack/react-query'
+import { gssiService } from '@/services/gssi.service'
 
-import { summaryMock } from '@/data/summary.mock'
-import { historyMock } from '@/data/history.mock'
-import { forecastMock } from '@/data/forecast.mock'
-import { driversMock } from '@/data/drivers.mock'
-import { implicationsMock } from '@/data/implications.mock'
-import { recommendationsMock } from '@/data/recommendations.mock'
+const STALE_TIME = 5 * 60 * 1000  // 5 minutes — pipeline output doesn't change second-to-second
 
 export function useDashboard() {
   const summaryQuery = useQuery({
-    queryKey: ['summary'],
-    queryFn: () => Promise.resolve(summaryMock),
+    queryKey: ['gssi', 'summary'],
+    queryFn: gssiService.getSummary,
+    staleTime: STALE_TIME,
+    retry: 2,
   })
 
   const historyQuery = useQuery({
-    queryKey: ['history'],
-    queryFn: () => Promise.resolve(historyMock),
+    queryKey: ['gssi', 'history'],
+    queryFn: gssiService.getHistory,
+    staleTime: STALE_TIME,
+    retry: 2,
   })
 
   const forecastQuery = useQuery({
-    queryKey: ['forecast'],
-    queryFn: () => Promise.resolve(forecastMock),
+    queryKey: ['gssi', 'forecast'],
+    queryFn: gssiService.getForecast,
+    staleTime: STALE_TIME,
+    retry: 2,
   })
 
   const driversQuery = useQuery({
-    queryKey: ['drivers'],
-    queryFn: () => Promise.resolve(driversMock),
+    queryKey: ['gssi', 'drivers'],
+    queryFn: gssiService.getDrivers,
+    staleTime: STALE_TIME,
+    retry: 2,
   })
 
   const implicationsQuery = useQuery({
-    queryKey: ['implications'],
-    queryFn: () => Promise.resolve(implicationsMock),
+    queryKey: ['gssi', 'implications'],
+    queryFn: gssiService.getImplications,
+    staleTime: STALE_TIME,
+    retry: 2,
   })
 
   const recommendationsQuery = useQuery({
-    queryKey: ['recommendations'],
-    queryFn: () => Promise.resolve(recommendationsMock),
+    queryKey: ['gssi', 'recommendations'],
+    queryFn: gssiService.getRecommendations,
+    staleTime: STALE_TIME,
+    retry: 2,
+  })
+
+  const validationQuery = useQuery({
+    queryKey: ['gssi', 'validation'],
+    queryFn: gssiService.getValidation,
+    staleTime: STALE_TIME,
+    retry: 2,
+  })
+
+  const refreshStatusQuery = useQuery({
+    queryKey: ['gssi', 'refresh-status'],
+    queryFn: gssiService.getRefreshStatus,
+    staleTime: 60 * 1000,  // refresh status checked every minute
+    retry: 1,
   })
 
   return {
-    summary: summaryQuery,
-    history: historyQuery,
-    forecast: forecastQuery,
-    drivers: driversQuery,
-    implications: implicationsQuery,
+    summary:         summaryQuery,
+    history:         historyQuery,
+    forecast:        forecastQuery,
+    drivers:         driversQuery,
+    implications:    implicationsQuery,
     recommendations: recommendationsQuery,
+    validation:      validationQuery,
+    refreshStatus:   refreshStatusQuery,
   }
 }

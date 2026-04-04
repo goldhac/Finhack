@@ -21,11 +21,35 @@ const trendType = (dir: 'up' | 'down' | 'flat'): 'up' | 'down' | 'neutral' =>
   dir === 'up' ? 'up' : dir === 'down' ? 'down' : 'neutral'
 
 export function DashboardPage() {
-  const { summary, history, forecast, drivers, implications, recommendations } = useDashboard()
+  const { summary, history, forecast, drivers, implications, recommendations, refreshStatus } = useDashboard()
 
   return (
     <AppShell>
       <AppHeader />
+
+      {/* ═══ Data Freshness Bar ═══ */}
+      {refreshStatus.data && (
+        <div className="flex items-center justify-between px-0 py-3 mb-8 border-b border-[#474747]/20">
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${
+              refreshStatus.data.pipeline_exit_code === 0
+                ? 'bg-green-500 animate-pulse'
+                : refreshStatus.data.timestamp_utc
+                  ? 'bg-yellow-500'
+                  : 'bg-[#474747]'
+            }`} />
+            <span className="font-mono text-[10px] text-[#C6C6C6] tracking-widest uppercase">
+              {refreshStatus.data.timestamp_utc
+                ? `DATA_LAST_REFRESHED: ${new Date(refreshStatus.data.timestamp_utc).toUTCString()}`
+                : 'NO_REFRESH_RUN — execute data_refresh.py to load live data'
+              }
+            </span>
+          </div>
+          <span className="font-mono text-[10px] text-[#474747] tracking-widest">
+            LIVE_PIPELINE_DATA
+          </span>
+        </div>
+      )}
 
       {/* ═══ Row 1 — Hero Metrics ═══ */}
       <section className="grid grid-cols-1 md:grid-cols-4 gap-0 mb-20">

@@ -656,208 +656,306 @@ print("STEP 10 – FORECASTING MODULE")
 print("="*70)
 
 import xgboost as xgb
+from sklearn.metrics import mean_absolute_error
 from statsmodels.tsa.holtwinters import ExponentialSmoothing as HoltWinters
 from statsmodels.tsa.arima.model import ARIMA as _ARIMA
 
-HORIZON      = 6
-HOLDOUT      = 12
-HIST_MIN     = float(gssi_bucketed.min())
-HIST_MAX     = float(gssi_bucketed.max())
-HIST_MEAN    = float(gssi_bucketed.mean())
+FORECAST_HORIZON = 6    # production forecast horizon in months
+HOLDOUT_MONTHS   = 6    # match holdout to production horizon exactly
+MIN_TRAIN_MONTHS = 36   # minimum months needed before forecasting begins
+
+HIST_MIN  = float(gssi_bucketed.min())
+HIST_MAX  = float(gssi_bucketed.max())
+HIST_MEAN = float(gssi_bucketed.mean())
 
 CONTRIB_COLS = [
     'contrib_A_freight', 'contrib_B_frictions',
     'contrib_C_energy_costs', 'contrib_D_production', 'contrib_overlay_vix',
 ]
 
-# ── Build XGBoost feature matrix ──────────────────────────────────────────────
-def build_xgb_features(gssi_s, contrib_df):
-    """Lag + rolling features; all lagged to avoid look-ahead bias."""
-    feat = pd.DataFrame(index=gssi_s.index)
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 10a – BUILD FEATURE MATRIX FOR XGBOOST
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n--- Step 10a: Building XGBoost feature matrix ---")
+
+feat_df = pd.DataFrame(index=gssi_bucketed.index)
+
+# Lags 1–3 of GSSI
+for lag in [1, 2, 3]:
+    feat_df[f'gssi_lag{lag}'] = gssi_bucketed.shift(lag)
+
+# Lags 1–3 of each bucket contribution
+contrib_short = {
+    'contrib_A_freight':      'contrib_A',
+    'contrib_B_frictions':    'contrib_B',
+    'contrib_C_energy_costs': 'contrib_C',
+    'contrib_D_production':   'contrib_D',
+    'contrib_overlay_vix':    'contrib_vix',
+}
+for col, short in contrib_short.items():
     for lag in [1, 2, 3]:
-        feat[f'gssi_lag{lag}'] = gssi_s.shift(lag)
-    for col in CONTRIB_COLS:
-        for lag in [1, 2, 3]:
-            feat[f'{col}_lag{lag}'] = contrib_df[col].shift(lag)
-    feat['gssi_roll3_mean'] = gssi_s.shift(1).rolling(3).mean()
-    feat['gssi_roll3_std']  = gssi_s.shift(1).rolling(3).std()
-    return feat
+        feat_df[f'{short}_lag{lag}'] = contributions[col].shift(lag)
 
-all_features = build_xgb_features(gssi_bucketed, contributions)
-valid_idx    = all_features.dropna().index
-feat_full    = all_features.loc[valid_idx]
-gssi_full    = gssi_bucketed.loc[valid_idx]
+# Rolling 3-month mean and std of GSSI, shifted by 1 (no look-ahead)
+feat_df['gssi_roll3_mean'] = gssi_bucketed.shift(1).rolling(3).mean()
+feat_df['gssi_roll3_std']  = gssi_bucketed.shift(1).rolling(3).std()
 
-train_feat   = feat_full.iloc[:-HOLDOUT]
-train_target = gssi_full.iloc[:-HOLDOUT]
-hold_target  = gssi_full.iloc[-HOLDOUT:]
+feat_df = feat_df.dropna()
+X = feat_df
+y = gssi_bucketed.loc[feat_df.index]
 
-train_series = gssi_bucketed.iloc[:-HOLDOUT]   # for HW / Naive
+print(f"  Feature matrix: {X.shape[0]} rows × {X.shape[1]} features")
+print(f"  Date range    : {X.index.min().date()} → {X.index.max().date()}")
 
-# ── MODEL 1: Naive Persistence ────────────────────────────────────────────────
-print("\n--- Model 1: Naive Persistence ---")
-naive_val           = float(train_series.iloc[-1])
-naive_holdout_preds = np.full(HOLDOUT, naive_val)
-mae_naive           = float(np.mean(np.abs(naive_holdout_preds - hold_target.values)))
-print(f"  Last known value : {naive_val:.3f}")
-print(f"  Holdout MAE      : {mae_naive:.3f}")
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 10b – WALK-FORWARD HOLDOUT VALIDATION (all 3 models)
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n--- Step 10b: Walk-forward validation (6-month holdout) ---")
 
-# ── MODEL 2: Holt-Winters ─────────────────────────────────────────────────────
-print("\n--- Model 2: Holt-Winters Exponential Smoothing ---")
-hw_display = None
+# Split feature matrix and target into train / holdout
+X_train = X.iloc[:-HOLDOUT_MONTHS]
+X_hold  = X.iloc[-HOLDOUT_MONTHS:]
+y_train = y.iloc[:-HOLDOUT_MONTHS]
+y_hold  = y.iloc[-HOLDOUT_MONTHS:]
+actuals = y_hold.values
+
+# Training slice of the raw GSSI series (for HW / Naive)
+train_series = gssi_bucketed.iloc[:-HOLDOUT_MONTHS]
+
+# ── Model 1: Naive Persistence ────────────────────────────────────────────────
+naive_val   = float(train_series.iloc[-1])
+preds_naive = [naive_val] * HOLDOUT_MONTHS
+
+# ── Model 2: Holt-Winters ─────────────────────────────────────────────────────
+hw_model_name = None
 
 def _fit_hw(series):
-    """Try HW with full seasonal, then trend-only, then ARIMA(1,1,1) fallback."""
-    global hw_display
+    """Try HW with full seasonal → trend-only → ARIMA(1,1,1) fallback."""
+    global hw_model_name
     try:
         m = HoltWinters(
             series, trend='add', seasonal='add', seasonal_periods=12,
             initialization_method='estimated',
         ).fit(optimized=True)
-        hw_display = "Holt-Winters (add trend + add seasonal)"
+        hw_model_name = "Holt-Winters (add trend + add seasonal)"
         return m, 'hw'
     except Exception as e1:
-        print(f"  Full seasonal failed ({e1}), trying trend-only...")
+        print(f"  Full seasonal HW failed ({e1}), trying trend-only...")
         try:
             m = HoltWinters(
                 series, trend='add', seasonal=None,
                 initialization_method='estimated',
             ).fit(optimized=True)
-            hw_display = "Holt-Winters (add trend only)"
+            hw_model_name = "Holt-Winters (add trend only)"
             return m, 'hw'
         except Exception as e2:
-            print(f"  Trend-only failed ({e2}), falling back to ARIMA(1,1,1)...")
+            print(f"  Trend-only HW failed ({e2}), falling back to ARIMA(1,1,1)...")
             m = _ARIMA(series, order=(1, 1, 1)).fit()
-            hw_display = "ARIMA(1,1,1) [HW fallback]"
+            hw_model_name = "ARIMA(1,1,1) [HW fallback]"
             return m, 'arima'
 
-hw_model_obj, hw_type = _fit_hw(train_series)
-print(f"  Fitted: {hw_display}")
+hw_holdout_obj, _ = _fit_hw(train_series)
+preds_hw = list(hw_holdout_obj.forecast(HOLDOUT_MONTHS).values)
+print(f"  HW variant used: {hw_model_name}")
 
-if hw_type == 'hw':
-    hw_holdout_preds = hw_model_obj.forecast(HOLDOUT).values
-else:
-    hw_holdout_preds = hw_model_obj.forecast(HOLDOUT).values
-
-mae_hw = float(np.mean(np.abs(hw_holdout_preds - hold_target.values)))
-print(f"  Holdout MAE      : {mae_hw:.3f}")
-
-# ── MODEL 3: XGBoost ─────────────────────────────────────────────────────────
-print("\n--- Model 3: XGBoost (lagged bucket features) ---")
-
-def xgb_recursive_forecast(model, seed_gssi, seed_contribs, n_steps):
-    """
-    Recursive multi-step forecasting.
-    seed_gssi must have >= 3 rows; seed_contribs aligned to same index.
-    """
-    gssi_hist    = list(seed_gssi.values)
-    contrib_hist = {col: list(seed_contribs[col].values) for col in CONTRIB_COLS}
-    preds = []
-    for _ in range(n_steps):
-        row = {}
-        for lag in [1, 2, 3]:
-            row[f'gssi_lag{lag}'] = gssi_hist[-lag]
-        for col in CONTRIB_COLS:
-            h = contrib_hist[col]
-            for lag in [1, 2, 3]:
-                row[f'{col}_lag{lag}'] = h[-lag]
-        recent = [gssi_hist[-3], gssi_hist[-2], gssi_hist[-1]]
-        row['gssi_roll3_mean'] = float(np.mean(recent))
-        row['gssi_roll3_std']  = (float(np.std(recent, ddof=1))
-                                  if len(set(recent)) > 1 else 0.0)
-        pred = float(model.predict(pd.DataFrame([row]))[0])
-        preds.append(pred)
-        gssi_hist.append(pred)
-        for col in CONTRIB_COLS:
-            contrib_hist[col].append(contrib_hist[col][-1])
-    return np.array(preds)
-
-xgb_model = xgb.XGBRegressor(
+# ── Model 3: XGBoost recursive ────────────────────────────────────────────────
+# Contribution lags are held fixed at last known values during recursion —
+# we only have a GSSI forecast, not a per-bucket forecast.
+xgb_holdout_model = xgb.XGBRegressor(
     n_estimators=200, max_depth=3, learning_rate=0.05,
     subsample=0.8, random_state=42, verbosity=0,
 )
-xgb_model.fit(train_feat.values, train_target.values)
+xgb_holdout_model.fit(X_train.values, y_train.values)
 
-seed_gssi_hold    = train_series.iloc[-3:]
-seed_contribs_hold = contributions.loc[seed_gssi_hold.index]
-xgb_holdout_preds = xgb_recursive_forecast(
-    xgb_model, seed_gssi_hold, seed_contribs_hold, HOLDOUT
-)
-mae_xgb = float(np.mean(np.abs(xgb_holdout_preds - hold_target.values)))
-print(f"  Holdout MAE      : {mae_xgb:.3f}")
+gssi_running   = list(train_series.values)   # full history up to holdout start
+last_row_train = X_train.iloc[-1].to_dict()  # last feature row from training
 
-# ── Summary table ─────────────────────────────────────────────────────────────
-print("\n" + "-"*58)
-print(f"{'Model':<33} {'Holdout MAE':>12} {'Beat Naive?':>11}")
-print("-"*58)
-print(f"{'Naive Persistence':<33} {mae_naive:>12.3f} {'—':>11}")
-print(f"{'Holt-Winters':<33} {mae_hw:>12.3f} {'Yes' if mae_hw < mae_naive else 'No':>11}")
-print(f"{'XGBoost (lagged bucket feats)':<33} {mae_xgb:>12.3f} {'Yes' if mae_xgb < mae_naive else 'No':>11}")
-print("-"*58)
+preds_xgb = []
+for step in range(HOLDOUT_MONTHS):
+    # Build feature vector from running history
+    row = {}
+    row['gssi_lag1'] = gssi_running[-1]
+    row['gssi_lag2'] = gssi_running[-2]
+    row['gssi_lag3'] = gssi_running[-3]
 
-# ── Select best model (Naive never ships) ─────────────────────────────────────
-mae_scores = {
-    'Holt-Winters':                mae_hw,
-    'XGBoost (lagged bucket feats)': mae_xgb,
-    'Naive Persistence':           mae_naive,
-}
-best_key = min(mae_scores, key=mae_scores.get)
-if best_key == 'Naive Persistence':
-    best_key = 'Holt-Winters'
-    print(f"\n  Naive wins on holdout — defaulting to Holt-Winters for production.")
+    # Bucket contribution lags: fixed at last known training values
+    for col, short in contrib_short.items():
+        row[f'{short}_lag1'] = last_row_train[f'{short}_lag1']
+        row[f'{short}_lag2'] = last_row_train[f'{short}_lag2']
+        row[f'{short}_lag3'] = last_row_train[f'{short}_lag3']
+
+    # Rolling stats over the running GSSI history
+    recent = gssi_running[-3:]
+    row['gssi_roll3_mean'] = float(np.mean(recent))
+    row['gssi_roll3_std']  = (float(np.std(recent, ddof=1))
+                              if len(set(recent)) > 1 else 0.0)
+
+    pred = float(xgb_holdout_model.predict(pd.DataFrame([row]))[0])
+    preds_xgb.append(pred)
+
+    # Update running GSSI with the new prediction (shift lag registers)
+    gssi_running.append(pred)
+    last_row_train['gssi_lag3'] = last_row_train['gssi_lag2']
+    last_row_train['gssi_lag2'] = last_row_train['gssi_lag1']
+    last_row_train['gssi_lag1'] = pred
+
+# ── Per-horizon MAE breakdown ─────────────────────────────────────────────────
+mae_by_horizon = {}
+for h in range(HOLDOUT_MONTHS):
+    mae_by_horizon[f"month_{h+1}"] = {
+        "naive":       round(abs(preds_naive[h] - actuals[h]), 4),
+        "holtwinters": round(abs(preds_hw[h]    - actuals[h]), 4),
+        "xgboost":     round(abs(preds_xgb[h]   - actuals[h]), 4),
+    }
+
+mae_naive = mean_absolute_error(actuals, preds_naive)
+mae_hw    = mean_absolute_error(actuals, preds_hw)
+mae_xgb   = mean_absolute_error(actuals, preds_xgb)
+
+# ── Model selection (Naive never selected for production) ─────────────────────
+if mae_hw <= mae_xgb:
+    best_model = 'Holt-Winters'
+    best_mae   = mae_hw
 else:
-    print(f"\n  Best model: {best_key}  (lowest holdout MAE = {mae_scores[best_key]:.3f})")
+    best_model = 'XGBoost'
+    best_mae   = mae_xgb
 
-# ── Production forecast (retrain on full series) ──────────────────────────────
-print(f"\n--- Production Forecast (6-month): {best_key} ---")
+beat_naive = best_mae < mae_naive
 
-forecast_dates = pd.date_range(
-    start=gssi_bucketed.index[-1] + pd.offsets.MonthEnd(1),
-    periods=HORIZON,
-    freq='ME',
-)
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 10c – PRINT VALIDATION RESULTS
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n╔══════════════════════════════════════════════════════╗")
+print("║           FORECASTING VALIDATION RESULTS             ║")
+print("╠══════════════════════════════════════════════════════╣")
+print("║ Model                     │ Holdout MAE │ Beat Naive ║")
+print("╠══════════════════════════════════════════════════════╣")
+print(f"║ {'Naive Persistence':<25} │   {mae_naive:.3f}     │     —      ║")
+print(f"║ {'Holt-Winters (' + hw_model_name[:10] + ')':<25} │   {mae_hw:.3f}     │  {'Yes' if mae_hw < mae_naive else 'No ':>3}         ║")
+print(f"║ {'XGBoost (lagged buckets)':<25} │   {mae_xgb:.3f}     │  {'Yes' if mae_xgb < mae_naive else 'No ':>3}         ║")
+print("╠══════════════════════════════════════════════════════╣")
+print(f"║ Best model selected: {best_model:<31}║")
+print("╚══════════════════════════════════════════════════════╝")
 
-if best_key == 'Holt-Winters':
-    prod_model_obj, _ = _fit_hw(gssi_bucketed)
-    prod_preds = prod_model_obj.forecast(HORIZON).values
-    prod_display = hw_display
-else:  # XGBoost
+print("\nPer-horizon MAE breakdown:")
+for h in range(HOLDOUT_MONTHS):
+    k  = f"month_{h+1}"
+    mn = mae_by_horizon[k]['naive']
+    mh = mae_by_horizon[k]['holtwinters']
+    mx = mae_by_horizon[k]['xgboost']
+    print(f"  Month {h+1} → Naive: {mn:.3f} | HW: {mh:.3f} | XGB: {mx:.3f}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 10d – PRODUCTION FORECAST (6 months forward, full dataset)
+# ─────────────────────────────────────────────────────────────────────────────
+print(f"\n--- Step 10d: Production forecast — {best_model} on full dataset ---")
+
+# Residuals from holdout (used for confidence bands)
+resid_hw  = np.array(actuals) - np.array(preds_hw)
+resid_xgb = np.array(actuals) - np.array(preds_xgb)
+
+if best_model == 'Holt-Winters':
+    prod_hw_obj, _ = _fit_hw(gssi_bucketed)
+    point_forecast = prod_hw_obj.forecast(FORECAST_HORIZON).values.copy()
+    resid_std = float(np.std(resid_hw, ddof=1))
+    prod_display = hw_model_name
+else:
+    # Retrain XGBoost on full feature matrix
     xgb_prod = xgb.XGBRegressor(
         n_estimators=200, max_depth=3, learning_rate=0.05,
         subsample=0.8, random_state=42, verbosity=0,
     )
-    xgb_prod.fit(feat_full.values, gssi_full.values)
-    seed_gssi_prod     = gssi_bucketed.iloc[-3:]
-    seed_contribs_prod = contributions.loc[seed_gssi_prod.index]
-    prod_preds   = xgb_recursive_forecast(
-        xgb_prod, seed_gssi_prod, seed_contribs_prod, HORIZON
-    )
-    prod_display = best_key
+    xgb_prod.fit(X.values, y.values)
 
-# Clip to observed range; replace non-finite with historical mean
-prod_preds = np.clip(prod_preds, HIST_MIN, HIST_MAX)
-prod_preds = np.where(np.isfinite(prod_preds), prod_preds, HIST_MEAN)
+    gssi_prod_running  = list(gssi_bucketed.values)
+    last_row_full      = X.iloc[-1].to_dict()
+    point_forecast_lst = []
 
-# ── Print forecast table ──────────────────────────────────────────────────────
-print(f"\n  Model used for production: {prod_display}")
-print(f"\n  {'Date':<12}  {'GSSI_Forecast':>14}")
-print("  " + "-"*28)
-for dt, val in zip(forecast_dates, prod_preds):
-    print(f"  {dt.strftime('%Y-%m-%d'):<12}  {val:>14.2f}")
+    for step in range(FORECAST_HORIZON):
+        row = {}
+        row['gssi_lag1'] = gssi_prod_running[-1]
+        row['gssi_lag2'] = gssi_prod_running[-2]
+        row['gssi_lag3'] = gssi_prod_running[-3]
+        for col, short in contrib_short.items():
+            row[f'{short}_lag1'] = last_row_full[f'{short}_lag1']
+            row[f'{short}_lag2'] = last_row_full[f'{short}_lag2']
+            row[f'{short}_lag3'] = last_row_full[f'{short}_lag3']
+        recent_p = gssi_prod_running[-3:]
+        row['gssi_roll3_mean'] = float(np.mean(recent_p))
+        row['gssi_roll3_std']  = (float(np.std(recent_p, ddof=1))
+                                  if len(set(recent_p)) > 1 else 0.0)
+        pred = float(xgb_prod.predict(pd.DataFrame([row]))[0])
+        point_forecast_lst.append(pred)
+        gssi_prod_running.append(pred)
+        last_row_full['gssi_lag3'] = last_row_full['gssi_lag2']
+        last_row_full['gssi_lag2'] = last_row_full['gssi_lag1']
+        last_row_full['gssi_lag1'] = pred
 
-# ── Write output/dashboard_data.json ─────────────────────────────────────────
-def _safe(x):
+    point_forecast = np.array(point_forecast_lst)
+    resid_std = float(np.std(resid_xgb, ddof=1))
+    prod_display = 'XGBoost (lagged buckets)'
+
+# Raw confidence bands from holdout residual spread
+lower_80 = point_forecast - 1.28 * resid_std
+upper_80 = point_forecast + 1.28 * resid_std
+lower_95 = point_forecast - 1.96 * resid_std
+upper_95 = point_forecast + 1.96 * resid_std
+
+# Mean-reversion constraint: weight grows from 0 → 0.5 over the forecast horizon.
+# GSSI is a z-score composite that structurally reverts toward zero; without this,
+# recursive forecasts can drift outside the historical range.
+for h in range(FORECAST_HORIZON):
+    reversion_weight    = h / (FORECAST_HORIZON * 2)   # 0.0 at h=0, 0.417 at h=5
+    point_forecast[h]   = (1 - reversion_weight) * point_forecast[h]   + reversion_weight * HIST_MEAN
+    lower_80[h]         = (1 - reversion_weight) * lower_80[h]         + reversion_weight * HIST_MEAN
+    upper_80[h]         = (1 - reversion_weight) * upper_80[h]         + reversion_weight * HIST_MEAN
+    lower_95[h]         = (1 - reversion_weight) * lower_95[h]         + reversion_weight * HIST_MEAN
+    upper_95[h]         = (1 - reversion_weight) * upper_95[h]         + reversion_weight * HIST_MEAN
+
+# Hard clip to historical range — prevents extrapolating outside observed data
+point_forecast = np.clip(point_forecast, HIST_MIN, HIST_MAX)
+lower_80       = np.clip(lower_80,       HIST_MIN, HIST_MAX)
+upper_80       = np.clip(upper_80,       HIST_MIN, HIST_MAX)
+lower_95       = np.clip(lower_95,       HIST_MIN, HIST_MAX)
+upper_95       = np.clip(upper_95,       HIST_MIN, HIST_MAX)
+
+# Replace any remaining non-finite values with historical mean (edge safety)
+def _safe_arr(arr):
+    return np.where(np.isfinite(arr), arr, HIST_MEAN)
+
+point_forecast = _safe_arr(point_forecast)
+lower_80       = _safe_arr(lower_80)
+upper_80       = _safe_arr(upper_80)
+lower_95       = _safe_arr(lower_95)
+upper_95       = _safe_arr(upper_95)
+
+# Forecast dates: month-start periods following the last historical date
+last_date    = gssi_bucketed.index[-1]
+future_dates = pd.date_range(
+    start=last_date + pd.offsets.MonthBegin(1),
+    periods=FORECAST_HORIZON,
+    freq='MS',
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 10e – WRITE output/dashboard_data.json
+# ─────────────────────────────────────────────────────────────────────────────
+print("\n--- Step 10e: Writing dashboard_data.json ---")
+
+def _safe_float(x, fallback=HIST_MEAN):
+    """Round to 4dp; replace non-finite with fallback."""
     v = float(x)
-    return round(v if np.isfinite(v) else HIST_MEAN, 2)
+    return round(v if np.isfinite(v) else fallback, 4)
 
 hist_tail = output_df.tail(36)
 
 historical_records = [
     {
         "Date":            dt.strftime("%Y-%m-%d"),
-        "GSSI_Historical": _safe(row['GSSI_bucketed']),
-        "GSCPI_Norm":      _safe(row['norm_GSCPI']),
-        "CPIAUCSL_Norm":   _safe(row['norm_CPI']),
+        "GSSI_Historical": _safe_float(row['GSSI_bucketed']),
+        "GSCPI_Norm":      _safe_float(row['norm_GSCPI']),
+        "CPIAUCSL_Norm":   _safe_float(row['norm_CPI']),
+        "regime":          str(row['regime']),
     }
     for dt, row in hist_tail.iterrows()
 ]
@@ -865,26 +963,46 @@ historical_records = [
 forecast_records = [
     {
         "Date":          dt.strftime("%Y-%m-%d"),
-        "GSSI_Forecast": round(float(v), 2),
+        "GSSI_Forecast": _safe_float(pf),
+        "lower_80":      _safe_float(l80),
+        "upper_80":      _safe_float(u80),
+        "lower_95":      _safe_float(l95),
+        "upper_95":      _safe_float(u95),
     }
-    for dt, v in zip(forecast_dates, prod_preds)
+    for dt, pf, l80, u80, l95, u95 in zip(
+        future_dates, point_forecast, lower_80, upper_80, lower_95, upper_95
+    )
 ]
 
+validation_block = {
+    "holdout_months":  HOLDOUT_MONTHS,
+    "mae_naive":       round(mae_naive, 4),
+    "mae_holtwinters": round(mae_hw,    4),
+    "mae_xgboost":     round(mae_xgb,   4),
+    "best_model":      best_model,
+    "beat_naive":      bool(beat_naive),
+    "mae_by_horizon":  mae_by_horizon,
+}
+
 forecast_meta = {
-    "target":                   "GSSI_bucketed",
-    "best_model":               best_key,
-    "horizon_months":           HORIZON,
-    "holdout_months":           HOLDOUT,
-    "holdout_mae_naive":        round(mae_naive, 4),
-    "holdout_mae_holtwinters":  round(mae_hw, 4),
-    "holdout_mae_xgboost":      round(mae_xgb, 4),
-    "note": ("Forecast uses walk-forward validation. Best model selected by "
-             "holdout MAE. Naive model never used for production."),
+    "target":                  "GSSI_bucketed",
+    "best_model":              best_model,
+    "hw_model_variant":        hw_model_name,
+    "horizon_months":          FORECAST_HORIZON,
+    "holdout_months":          HOLDOUT_MONTHS,
+    "mean_reversion_applied":  True,
+    "confidence_bands":        "residual-based 80% and 95%",
+    "note": (
+        "Forecast uses walk-forward validation on 6-month holdout matching "
+        "production horizon. Mean reversion applied with weight growing to 0.5 "
+        "at horizon end. Hard clipped to historical range."
+    ),
 }
 
 dash_payload = {
     "historical":    historical_records,
     "forecast":      forecast_records,
+    "validation":    validation_block,
     "forecast_meta": forecast_meta,
 }
 
@@ -892,10 +1010,23 @@ dash_path = os.path.join(OUTPUT_DIR, 'dashboard_data.json')
 with open(dash_path, 'w') as f:
     json.dump(dash_payload, f, indent=4, allow_nan=False)
 
-print(f"\nSaved: {dash_path}")
+print(f"  Saved: {dash_path}")
 print(f"  historical : {len(historical_records)} records")
 print(f"  forecast   : {len(forecast_records)} records")
-print(f"  best model : {best_key}")
+print(f"  best model : {best_model}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STEP 10f – PRINT 6-MONTH FORECAST TABLE
+# ─────────────────────────────────────────────────────────────────────────────
+print(f"\n6-Month Production Forecast  ({prod_display}):")
+print(f"  {'Date':<12} │ {'GSSI Forecast':>13} │ {'80% Band':<21} │ {'95% Band':<21}")
+print("  " + "─" * 14 + "┼" + "─" * 15 + "┼" + "─" * 23 + "┼" + "─" * 22)
+for dt, pf, l80, u80, l95, u95 in zip(
+    future_dates, point_forecast, lower_80, upper_80, lower_95, upper_95
+):
+    band80 = f"[{l80:.4f}, {u80:.4f}]"
+    band95 = f"[{l95:.4f}, {u95:.4f}]"
+    print(f"  {dt.strftime('%Y-%m-%d'):<12} │    {pf:>8.4f}     │ {band80:<21} │ {band95:<21}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
