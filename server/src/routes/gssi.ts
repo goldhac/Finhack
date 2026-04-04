@@ -333,6 +333,16 @@ export function createGssiRouter(outputDir: string): Router {
     }
   })
 
+  // ── GET /backtest ────────────────────────────────────────────────────────────
+  router.get('/backtest', (_req, res) => {
+    try {
+      const data = readJson<Record<string, unknown>>(p('backtest_results.json'))
+      res.json(data)
+    } catch {
+      res.status(503).json({ error: 'backtest_results.json not found. Run backtest_chart.py to generate.' })
+    }
+  })
+
   // ── GET /refresh-status ─────────────────────────────────────────────────────
   router.get('/refresh-status', (_req, res) => {
     try {

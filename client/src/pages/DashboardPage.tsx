@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AppShell } from '@/components/layout/AppShell'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { SectionCard } from '@/components/layout/SectionCard'
@@ -5,6 +6,7 @@ import { MetricCard } from '@/components/common/MetricCard'
 import { StatusBadge } from '@/components/common/StatusBadge'
 import { TrendChart } from '@/components/charts/TrendChart'
 import { ForecastChart } from '@/components/charts/ForecastChart'
+import { BacktestChart } from '@/components/charts/BacktestChart'
 import { DriverChart } from '@/components/charts/DriverChart'
 import { ImplicationChart } from '@/components/charts/ImplicationChart'
 import { LoadingState } from '@/components/common/LoadingState'
@@ -21,7 +23,8 @@ const trendType = (dir: 'up' | 'down' | 'flat'): 'up' | 'down' | 'neutral' =>
   dir === 'up' ? 'up' : dir === 'down' ? 'down' : 'neutral'
 
 export function DashboardPage() {
-  const { summary, history, forecast, drivers, implications, recommendations, refreshStatus } = useDashboard()
+  const { summary, history, forecast, drivers, implications, recommendations, refreshStatus, backtest } = useDashboard()
+  const [forecastTab, setForecastTab] = useState<'forecast' | 'backtest'>('forecast')
 
   return (
     <AppShell>
@@ -124,19 +127,57 @@ export function DashboardPage() {
 
       {/* ═══ Row 3 — Forecast Models ═══ */}
       <section className="mb-24">
-        <SectionCard title="Predictive Deviation Models">
-          {forecast.isLoading ? (
-            <LoadingState rows={8} />
-          ) : forecast.error ? (
-            <ErrorState message="Failed to load predictive modeling." onRetry={() => forecast.refetch()} />
-          ) : forecast.data ? (
-            <ForecastChart
-              data={forecast.data}
-              forecast1M={summary.data?.forecast1Month}
-              forecast3M={summary.data?.forecast3Month}
-              probability={summary.data?.forecast3MonthProbability}
-            />
-          ) : null}
+        <SectionCard
+          title="Predictive Deviation Models"
+          action={
+            <div className="flex items-center gap-0 border border-[#474747]/40">
+              <button
+                onClick={() => setForecastTab('forecast')}
+                className={cn(
+                  'px-4 py-1.5 font-mono text-[9px] tracking-widest uppercase transition-colors',
+                  forecastTab === 'forecast'
+                    ? 'bg-[#0F62FE] text-white'
+                    : 'text-[#C6C6C6] hover:text-white hover:bg-[#1F1F1F]'
+                )}
+              >
+                6M_Forecast
+              </button>
+              <button
+                onClick={() => setForecastTab('backtest')}
+                className={cn(
+                  'px-4 py-1.5 font-mono text-[9px] tracking-widest uppercase transition-colors border-l border-[#474747]/40',
+                  forecastTab === 'backtest'
+                    ? 'bg-[#0F62FE] text-white'
+                    : 'text-[#C6C6C6] hover:text-white hover:bg-[#1F1F1F]'
+                )}
+              >
+                Backtest_2020–2024
+              </button>
+            </div>
+          }
+        >
+          {forecastTab === 'forecast' ? (
+            forecast.isLoading ? (
+              <LoadingState rows={8} />
+            ) : forecast.error ? (
+              <ErrorState message="Failed to load predictive modeling." onRetry={() => forecast.refetch()} />
+            ) : forecast.data ? (
+              <ForecastChart
+                data={forecast.data}
+                forecast1M={summary.data?.forecast1Month}
+                forecast3M={summary.data?.forecast3Month}
+                probability={summary.data?.forecast3MonthProbability}
+              />
+            ) : null
+          ) : (
+            backtest.isLoading ? (
+              <LoadingState rows={8} />
+            ) : backtest.error ? (
+              <ErrorState message="Backtest data unavailable. Run backtest_chart.py to generate." onRetry={() => backtest.refetch()} />
+            ) : backtest.data ? (
+              <BacktestChart data={backtest.data} />
+            ) : null
+          )}
         </SectionCard>
       </section>
 

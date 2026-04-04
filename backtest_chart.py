@@ -26,13 +26,14 @@ gssi = df['GSSI_bucketed']
 
 # ── Forecast origins: the last month-end before each calendar year ────────────
 ORIGINS = {
+    2020: '2019-12-31',
+    2021: '2020-12-31',
     2022: '2021-12-31',
     2023: '2022-12-31',
     2024: '2023-12-31',
-    2025: '2024-12-31',
 }
 HORIZON   = 12
-COLORS    = {2022: '#d62728', 2023: '#ff7f0e', 2024: '#1f77b4', 2025: '#9467bd'}
+COLORS    = {2020: '#2ca02c', 2021: '#17becf', 2022: '#d62728', 2023: '#ff7f0e', 2024: '#1f77b4'}
 
 # ── Helper: fit Holt-Winters (with fallbacks) ─────────────────────────────────
 def fit_hw(series):
@@ -206,3 +207,50 @@ fig.write_html(
     },
 )
 print(f"\nSaved: {out_path}")
+
+# ── Write backtest_results.json for the React dashboard ──────────────────────
+# Actual series from 2019 onwards (anchor context for the chart)
+context_window = gssi.loc['2019-01-01':]
+actual_series = [
+    {"date": dt.strftime("%Y-%m-%d"), "actual": round(float(v), 4)}
+    for dt, v in context_window.items()
+    if np.isfinite(v)
+]
+
+years_data = []
+for year, r in results.items():
+    fcast  = r['forecast']
+    actual = r['actual']
+
+    # Anchor point = last training value (so line connects to actual)
+    anchor_date = r['origin']
+    anchor_val  = float(gssi.loc[anchor_date])
+
+    series = [{"date": anchor_date.strftime("%Y-%m-%d"),
+               "forecast": round(anchor_val, 4), "actual": round(anchor_val, 4)}]
+    for dt in fcast.index:
+        fv = round(float(fcast.loc[dt]), 4)
+        av = round(float(actual.loc[dt]), 4) if dt in actual.index else None
+        series.append({"date": dt.strftime("%Y-%m-%d"), "forecast": fv, "actual": av})
+
+    years_data.append({
+        "year":         year,
+        "origin_date":  anchor_date.strftime("%Y-%m-%d"),
+        "train_months": int(len(gssi.loc[:anchor_date])),
+        "mae":          round(r['mae'], 4) if r['mae'] is not None else None,
+        "n_actual":     int(r['n_actual']),
+        "color":        COLORS[year],
+        "series":       series,
+    })
+
+backtest_payload = {
+    "model":          "Holt-Winters (walk-forward, no look-ahead)",
+    "horizon_months": HORIZON,
+    "years":          years_data,
+    "actual_context": actual_series,
+}
+
+json_path = os.path.join(OUTPUT_DIR, 'backtest_results.json')
+with open(json_path, 'w') as f:
+    json.dump(backtest_payload, f, indent=2, allow_nan=False)
+print(f"Saved: {json_path}")

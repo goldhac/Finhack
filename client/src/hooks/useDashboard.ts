@@ -60,6 +60,13 @@ export function useDashboard() {
     retry: 1,
   })
 
+  const backtestQuery = useQuery({
+    queryKey: ['gssi', 'backtest'],
+    queryFn: gssiService.getBacktest,
+    staleTime: STALE_TIME,
+    retry: 2,
+  })
+
   return {
     summary:         summaryQuery,
     history:         historyQuery,
@@ -69,5 +76,6 @@ export function useDashboard() {
     recommendations: recommendationsQuery,
     validation:      validationQuery,
     refreshStatus:   refreshStatusQuery,
+    backtest:        backtestQuery,
   }
 }
