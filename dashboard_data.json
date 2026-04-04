@@ -1,0 +1,255 @@
+{
+    "historical": [
+        {
+            "Date": "2023-02-01",
+            "GSSI_Historical": 40.3,
+            "GSCPI_Norm": 22.37,
+            "CPIAUCSL_Norm": 84.28
+        },
+        {
+            "Date": "2023-03-01",
+            "GSSI_Historical": 34.16,
+            "GSCPI_Norm": 6.91,
+            "CPIAUCSL_Norm": 84.5
+        },
+        {
+            "Date": "2023-04-01",
+            "GSSI_Historical": 32.91,
+            "GSCPI_Norm": 4.61,
+            "CPIAUCSL_Norm": 85.12
+        },
+        {
+            "Date": "2023-05-01",
+            "GSSI_Historical": 29.78,
+            "GSCPI_Norm": 0.0,
+            "CPIAUCSL_Norm": 85.42
+        },
+        {
+            "Date": "2023-06-01",
+            "GSSI_Historical": 31.35,
+            "GSCPI_Norm": 7.73,
+            "CPIAUCSL_Norm": 85.83
+        },
+        {
+            "Date": "2023-07-01",
+            "GSSI_Historical": 33.46,
+            "GSCPI_Norm": 10.53,
+            "CPIAUCSL_Norm": 86.19
+        },
+        {
+            "Date": "2023-08-01",
+            "GSSI_Historical": 34.38,
+            "GSCPI_Norm": 8.39,
+            "CPIAUCSL_Norm": 87.08
+        },
+        {
+            "Date": "2023-09-01",
+            "GSSI_Historical": 38.34,
+            "GSCPI_Norm": 15.3,
+            "CPIAUCSL_Norm": 87.8
+        },
+        {
+            "Date": "2023-10-01",
+            "GSSI_Historical": 41.1,
+            "GSCPI_Norm": 20.07,
+            "CPIAUCSL_Norm": 88.06
+        },
+        {
+            "Date": "2023-11-01",
+            "GSSI_Historical": 41.55,
+            "GSCPI_Norm": 28.95,
+            "CPIAUCSL_Norm": 88.33
+        },
+        {
+            "Date": "2023-12-01",
+            "GSSI_Historical": 38.02,
+            "GSCPI_Norm": 23.52,
+            "CPIAUCSL_Norm": 88.69
+        },
+        {
+            "Date": "2024-01-01",
+            "GSSI_Historical": 37.57,
+            "GSCPI_Norm": 20.56,
+            "CPIAUCSL_Norm": 89.27
+        },
+        {
+            "Date": "2024-02-01",
+            "GSSI_Historical": 39.44,
+            "GSCPI_Norm": 23.03,
+            "CPIAUCSL_Norm": 90.03
+        },
+        {
+            "Date": "2024-03-01",
+            "GSSI_Historical": 39.14,
+            "GSCPI_Norm": 20.39,
+            "CPIAUCSL_Norm": 90.86
+        },
+        {
+            "Date": "2024-04-01",
+            "GSSI_Historical": 36.77,
+            "GSCPI_Norm": 10.36,
+            "CPIAUCSL_Norm": 91.27
+        },
+        {
+            "Date": "2024-05-01",
+            "GSSI_Historical": 37.24,
+            "GSCPI_Norm": 16.61,
+            "CPIAUCSL_Norm": 91.37
+        },
+        {
+            "Date": "2024-06-01",
+            "GSSI_Historical": 38.55,
+            "GSCPI_Norm": 20.39,
+            "CPIAUCSL_Norm": 91.29
+        },
+        {
+            "Date": "2024-07-01",
+            "GSSI_Historical": 41.63,
+            "GSCPI_Norm": 25.49,
+            "CPIAUCSL_Norm": 91.6
+        },
+        {
+            "Date": "2024-08-01",
+            "GSSI_Historical": 44.38,
+            "GSCPI_Norm": 29.61,
+            "CPIAUCSL_Norm": 91.9
+        },
+        {
+            "Date": "2024-09-01",
+            "GSSI_Historical": 42.13,
+            "GSCPI_Norm": 27.96,
+            "CPIAUCSL_Norm": 92.31
+        },
+        {
+            "Date": "2024-10-01",
+            "GSSI_Historical": 40.37,
+            "GSCPI_Norm": 20.39,
+            "CPIAUCSL_Norm": 92.85
+        },
+        {
+            "Date": "2024-11-01",
+            "GSSI_Historical": 39.11,
+            "GSCPI_Norm": 21.55,
+            "CPIAUCSL_Norm": 93.39
+        },
+        {
+            "Date": "2024-12-01",
+            "GSSI_Historical": 39.34,
+            "GSCPI_Norm": 21.88,
+            "CPIAUCSL_Norm": 94.04
+        },
+        {
+            "Date": "2025-01-01",
+            "GSSI_Historical": 41.28,
+            "GSCPI_Norm": 23.19,
+            "CPIAUCSL_Norm": 94.86
+        },
+        {
+            "Date": "2025-02-01",
+            "GSSI_Historical": 41.95,
+            "GSCPI_Norm": 26.15,
+            "CPIAUCSL_Norm": 95.3
+        },
+        {
+            "Date": "2025-03-01",
+            "GSSI_Historical": 42.09,
+            "GSCPI_Norm": 23.19,
+            "CPIAUCSL_Norm": 95.36
+        },
+        {
+            "Date": "2025-04-01",
+            "GSSI_Historical": 44.85,
+            "GSCPI_Norm": 22.2,
+            "CPIAUCSL_Norm": 95.67
+        },
+        {
+            "Date": "2025-05-01",
+            "GSSI_Historical": 43.71,
+            "GSCPI_Norm": 30.76,
+            "CPIAUCSL_Norm": 95.87
+        },
+        {
+            "Date": "2025-06-01",
+            "GSSI_Historical": 42.75,
+            "GSCPI_Norm": 27.63,
+            "CPIAUCSL_Norm": 96.36
+        },
+        {
+            "Date": "2025-07-01",
+            "GSSI_Historical": 41.64,
+            "GSCPI_Norm": 26.48,
+            "CPIAUCSL_Norm": 96.8
+        },
+        {
+            "Date": "2025-08-01",
+            "GSSI_Historical": 40.24,
+            "GSCPI_Norm": 24.67,
+            "CPIAUCSL_Norm": 97.48
+        },
+        {
+            "Date": "2025-09-01",
+            "GSSI_Historical": 40.69,
+            "GSCPI_Norm": 25.82,
+            "CPIAUCSL_Norm": 98.06
+        },
+        {
+            "Date": "2025-11-01",
+            "GSSI_Historical": 40.74,
+            "GSCPI_Norm": 23.52,
+            "CPIAUCSL_Norm": 98.55
+        },
+        {
+            "Date": "2025-12-01",
+            "GSSI_Historical": 43.52,
+            "GSCPI_Norm": 35.03,
+            "CPIAUCSL_Norm": 99.14
+        },
+        {
+            "Date": "2026-01-01",
+            "GSSI_Historical": 43.37,
+            "GSCPI_Norm": 33.06,
+            "CPIAUCSL_Norm": 99.47
+        },
+        {
+            "Date": "2026-02-01",
+            "GSSI_Historical": 45.82,
+            "GSCPI_Norm": 34.21,
+            "CPIAUCSL_Norm": 100.0
+        }
+    ],
+    "forecast": [
+        {
+            "Date": "2026-03-01",
+            "GSSI_Forecast": 46.54
+        },
+        {
+            "Date": "2026-04-01",
+            "GSSI_Forecast": 47.85
+        },
+        {
+            "Date": "2026-05-01",
+            "GSSI_Forecast": 47.94
+        },
+        {
+            "Date": "2026-06-01",
+            "GSSI_Forecast": 47.14
+        },
+        {
+            "Date": "2026-07-01",
+            "GSSI_Forecast": 47.01
+        },
+        {
+            "Date": "2026-08-01",
+            "GSSI_Forecast": 46.81
+        }
+    ],
+    "forecast_meta": {
+        "target": "GSSI_Historical",
+        "model": "HoltWinters(add trend, add seasonal, m=12)",
+        "horizon_months": 6,
+        "holdout_months": 12,
+        "holdout_mae": 1.5216769340429543,
+        "holdout_model": "HoltWinters(add trend, add seasonal, m=12)",
+        "note": "GSSI is a weighted min-max composite of GSCPI, CPI, WTI, VIX; forecast is fit on GSSI only."
+    }
+}
