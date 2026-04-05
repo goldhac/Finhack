@@ -36,7 +36,8 @@ if (fs.existsSync(clientDistPath)) {
   app.use(express.static(clientDistPath))
   
   // Catch-all route to serve React's index.html for frontend routing
-  app.get('*', (req, res) => {
+  // Using app.use() instead of app.get('*') to be compatible with Express v5 path routing
+  app.use((req, res) => {
     if (!req.path.startsWith('/api/')) {
       res.sendFile(path.join(clientDistPath, 'index.html'))
     } else {
