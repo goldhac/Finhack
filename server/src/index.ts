@@ -30,6 +30,21 @@ app.use('/api/scenarios', scenariosRouter)
 app.use('/api/chat', chatRouter)
 app.use('/api/gssi', createGssiRouter(OUTPUT_DIR))
 
+// Serve frontend static files (Production/Docker deployment)
+const clientDistPath = path.resolve(path.join(process.cwd(), '..', 'client', 'dist'))
+if (fs.existsSync(clientDistPath)) {
+  app.use(express.static(clientDistPath))
+  
+  // Catch-all route to serve React's index.html for frontend routing
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api/')) {
+      res.sendFile(path.join(clientDistPath, 'index.html'))
+    } else {
+      res.status(404).json({ error: 'API endpoint not found' })
+    }
+  })
+}
+
 app.listen(PORT, () => {
   console.log(`⚡ ChainPulse API server running on http://localhost:${PORT}`)
   console.log(`   Gemini key: ${process.env.GEMINI_API_KEY ? '✓ loaded' : '✗ MISSING — add to .env'}`)

@@ -6,7 +6,6 @@ import {
   Tooltip,
   ResponsiveContainer,
   ReferenceLine,
-  Legend,
 } from 'recharts'
 import type { BacktestResults } from '@/services/gssi.service'
 
