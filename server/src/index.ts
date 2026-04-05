@@ -6,6 +6,7 @@ import cors from 'cors'
 import { scenariosRouter } from './routes/scenarios.js'
 import { chatRouter } from './routes/chat.js'
 import { createGssiRouter } from './routes/gssi.js'
+import rateLimit from 'express-rate-limit'
 
 const app = express()
 const PORT = process.env.PORT || 3001
@@ -14,11 +15,34 @@ const OUTPUT_DIR = process.env.OUTPUT_DIR
   ? path.resolve(process.env.OUTPUT_DIR)
   : path.resolve(path.join(process.cwd(), '..', 'output'))
 
+// Trust reverse proxies (essential for Railway/Render to get true client IPs for rate limiting)
+app.set('trust proxy', 1)
+
+// --- RATE LIMITERS ---
+const globalLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, 
+  limit: 500, 
+  message: { error: 'Too many requests from this IP, please try again in 15 minutes.' },
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+})
+
+const aiLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, 
+  limit: 15, 
+  message: { error: 'AI limit exceeded. Test deployments are restricted to 15 Gemini queries per hour. Please try again later.' },
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+})
+
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:5174', 'http://localhost:5175'],
   methods: ['GET', 'POST'],
 }))
 app.use(express.json({ limit: '10mb' }))
+
+// Apply global rate limiting to all traffic
+app.use(globalLimiter)
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -26,8 +50,9 @@ app.get('/api/health', (_req, res) => {
 })
 
 // Routes
-app.use('/api/scenarios', scenariosRouter)
-app.use('/api/chat', chatRouter)
+// Apply strict AI limiting only to the endpoints invoking Gemini
+app.use('/api/scenarios', aiLimiter, scenariosRouter)
+app.use('/api/chat', aiLimiter, chatRouter)
 app.use('/api/gssi', createGssiRouter(OUTPUT_DIR))
 
 // Serve frontend static files (Production/Docker deployment)
