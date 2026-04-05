@@ -324,6 +324,10 @@ export function ChatPage() {
               <span className="text-[9px] text-[#393939] font-['Inter']">
                 Press Enter to send · Shift+Enter for new line
               </span>
+              <span className="text-[10px] text-[#0F62FE]/80 font-['Inter'] flex items-center gap-1 bg-[#0F62FE]/5 border border-[#0F62FE]/20 px-2 py-0.5 rounded-sm">
+                <span className="material-symbols-outlined text-[11px] animate-pulse">shield_locked</span>
+                Test Env Quota: 5 Interactions / Hr
+              </span>
               <span className="text-[9px] text-[#393939] font-['Inter'] flex items-center gap-1">
                 <span className="material-symbols-outlined text-[10px]">{cached ? 'folder_open' : 'folder_off'}</span>
                 {cached ? 'Portfolio active' : 'No portfolio uploaded'} · {messages.length} messages

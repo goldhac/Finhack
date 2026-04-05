@@ -92,6 +92,12 @@ export function ScenariosPage() {
                   Simulate
                 </button>
               </div>
+              <div className="mt-2 flex justify-end">
+                <span className="text-[10px] text-[#0F62FE]/80 font-['Inter'] flex items-center gap-1 bg-[#0F62FE]/5 border border-[#0F62FE]/20 px-2 py-0.5 rounded-sm">
+                  <span className="material-symbols-outlined text-[11px] animate-pulse">shield_locked</span>
+                  Test Env Quota: 5 Simulations / Hr
+                </span>
+              </div>
             </div>
 
             {/* Preset Chips with Popularity Ranking */}
